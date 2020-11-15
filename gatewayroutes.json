@@ -1,0 +1,18 @@
+{
+  "/device-services": {
+    "nextEndPoint": 0,
+    "cacheable": false,
+    "cacheTTL": 3600,
+    "rateLimit": 25,
+    "rateLimitDuration": 10,
+    "endPoints": [
+      {
+        "url": "http://localhost:8080/services",
+        "healthURL": "http://localhost:8080/health",
+        "lastHealthStatus": true
+      }
+
+    ]
+  }
+
+}
