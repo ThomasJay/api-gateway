@@ -10,6 +10,7 @@
 
 const express = require("express");
 const compression = require("compression");
+const cors = require("cors");
 const bodyParser = require("body-parser");
 const axios = require("axios");
 const CronJob = require("cron").CronJob;
@@ -19,6 +20,8 @@ const fs = require("fs");
 
 const app = express();
 app.use(compression());
+app.use(cors());
+app.use(bodyParser.json());
 
 const dotEnvLoadStatus = require("dotenv").config();
 
@@ -191,9 +194,17 @@ const checkRateLimit = async (req, res, next) => {
 };
 
 app.get("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
+  processHTTPRequest(req, res, next);
+});
+
+app.post("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
+  processHTTPRequest(req, res, next);
+});
+
+const processHTTPRequest = async function (req, res, next) {
   const fullURL = req.url;
 
-  //  console.log("URL Called: " + fullURL);
+  console.log("URL Called: " + fullURL + " " + req.method);
 
   // console.log(req.headers);
 
@@ -237,9 +248,39 @@ app.get("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
     }
 
     if (req.method === "GET") {
+      console.log("Process GET");
       // Pass all headers from caller to the new end point
       axios
         .get(endPointURL + remainingURL, { headers: req.headers })
+        .then(function (response) {
+          res.status(response.status);
+          //console.log(response.headers);
+          // Pass response headers to caller
+          res.headers = response.headers;
+          res.send(response.data);
+
+          //add data to Redis
+          //         redis_client.setex(id, 3600, JSON.stringify(starShipInfoData));
+        })
+        .catch(function (error) {
+          if (error.response && error.response.status) {
+            // handle error
+            res.status(error.response.status);
+            res.send(error.response.data);
+          } else {
+            console.log("Service not available 2");
+            res.status(500);
+            res.send("Service Unavailable");
+          }
+        });
+    }
+
+    if (req.method === "POST") {
+      // Pass all headers from caller to the new end point
+      const bodyData = req.body;
+      console.log("Process POST : " + bodyData);
+      axios
+        .post(endPointURL + remainingURL, bodyData, { headers: req.headers })
         .then(function (response) {
           res.status(response.status);
           //console.log(response.headers);
@@ -266,7 +307,7 @@ app.get("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
     res.status(400);
     res.send("Failed to resolve mapping");
   }
-});
+};
 
 // Health Check processing
 const processHealthCheck = async function () {
