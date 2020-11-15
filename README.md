@@ -28,7 +28,7 @@ There are a couple of basic functions built into the system.
 
 1 - status. Calling HTTP GET /status gives you output on the API calls, this consist of the URL endpoints and the number of calls to each end point broken up by GET, POST, PUT, PATCH and DELELTE.
 
-2 - clearredis. Calling HTTP POSY /clearredis clears the redis values for the API Gateway. This peforms a FlushAll on the redis server.
+2 - clearredis. Calling HTTP POST /clearredis clears the redis values for the API Gateway. This peforms a FlushAll on the redis server.
 
 ## Written By Thomas Jay
 
