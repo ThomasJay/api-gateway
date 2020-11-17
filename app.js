@@ -49,7 +49,7 @@ const redis_client = redis.createClient({
 });
 
 redis_client.on("connect", function () {
-  console.log("Redis Connected");
+  //console.log("Redis Connected");
 });
 
 app.get("/status", async (req, res) => {
@@ -109,7 +109,7 @@ const checkRedisCache = async (req, res, next) => {
     match = "/" + shortMatches[1];
   }
 
-  console.log("match=" + match);
+  // console.log("match=" + match);
 
   // If we have a match, check for cachable data
   if (serviceMappings[match]) {
@@ -150,7 +150,7 @@ const checkRateLimit = async (req, res, next) => {
     match = "/" + shortMatches[1];
   }
 
-  console.log("match=" + match);
+  // console.log("match=" + match);
 
   // If we have a match, check for ratelimit data
   if (serviceMappings[match]) {
@@ -167,9 +167,9 @@ const checkRateLimit = async (req, res, next) => {
       }
     }
 
-    console.log(
-      `Inc Done. ${rateLimitKey} has value: ${currentRateLimitValue}`
-    );
+    // console.log(
+    //   `Inc Done. ${rateLimitKey} has value: ${currentRateLimitValue}`
+    // );
 
     if (currentRateLimitValue > serviceMap.rateLimit) {
       console.log(
@@ -181,12 +181,12 @@ const checkRateLimit = async (req, res, next) => {
       return res.status(429).send("Too many requests - try again later");
     }
 
-    console.log(
-      "Extending rateLimit time 10 seconds key: " +
-        rateLimitKey +
-        " value " +
-        currentRateLimitValue
-    );
+    // console.log(
+    //   "Extending rateLimit time. key: " +
+    //     rateLimitKey +
+    //     " value " +
+    //     currentRateLimitValue
+    // );
     redis_client.expire(rateLimitKey, serviceMap.rateLimitDuration);
   }
 
@@ -201,10 +201,30 @@ app.post("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
   processHTTPRequest(req, res, next);
 });
 
+app.put("*", checkRateLimit, checkRedisCache, async function (req, res, next) {
+  processHTTPRequest(req, res, next);
+});
+
+app.patch("*", checkRateLimit, checkRedisCache, async function (
+  req,
+  res,
+  next
+) {
+  processHTTPRequest(req, res, next);
+});
+
+app.delete("*", checkRateLimit, checkRedisCache, async function (
+  req,
+  res,
+  next
+) {
+  processHTTPRequest(req, res, next);
+});
+
 const processHTTPRequest = async function (req, res, next) {
   const fullURL = req.url;
 
-  console.log("URL Called: " + fullURL + " " + req.method);
+  //console.log("URL Called: " + fullURL + " " + req.method);
 
   // console.log(req.headers);
 
@@ -222,7 +242,7 @@ const processHTTPRequest = async function (req, res, next) {
     remainingURL = fullURL.substr(match.length);
   }
 
-  console.log("match=" + match);
+  // console.log("match=" + match);
   if (serviceMappings[match]) {
     const serviceMap = serviceMappings[match];
     //   console.log("Request Type:", req.method);
@@ -230,25 +250,70 @@ const processHTTPRequest = async function (req, res, next) {
     // Get end point
     var endPointURL = serviceMap.endPoints[serviceMap.nextEndPoint].url;
 
-    // Move to next end point if there are multiple ones
-    if (serviceMap.endPoints.length > 1) {
-      if (serviceMap.nextEndPoint + 1 > serviceMap.endPoints.length - 1) {
-        serviceMap.nextEndPoint = serviceMap.nextEndPoint + 1;
-      } else {
-        serviceMap.nextEndPoint = 0;
+    // console.log("nextEndPoint:", serviceMap.nextEndPoint);
+
+    // Check for a healthy end point
+    if (
+      serviceMap.endPoints[serviceMap.nextEndPoint].lastHealthStatus === false
+    ) {
+      // If this is the only end point and its down then let caller know
+      if (serviceMap.endPoints.length == 1) {
+        console.log("Single Service not available 1");
+        res.status(500);
+        res.send("Service not available");
+        return;
       }
-    } else {
-      console.log("Only one end point, no inc to end point index");
-      if (serviceMap.endPoints[0].lastHealthStatus === false) {
-        console.log("Service not available 1");
+
+      // Now we need to look at the other end points, if the have all failed
+      // then let the caller know of the issue
+      // otherwise move to the next healthy end point
+      let failCount = 1;
+      const maxFails = serviceMap.endPoints.length;
+
+      for (let i = 1; i < maxFails; i++) {
+        // Inc to next end point and check
+        if (serviceMap.nextEndPoint + 1 < serviceMap.endPoints.length) {
+          serviceMap.nextEndPoint = serviceMap.nextEndPoint + 1;
+        } else {
+          serviceMap.nextEndPoint = 0;
+        }
+
+        endPointURL = serviceMap.endPoints[serviceMap.nextEndPoint].url;
+
+        if (
+          serviceMap.endPoints[serviceMap.nextEndPoint].lastHealthStatus ===
+          false
+        ) {
+          // console.log(
+          //   "Found failed health end point " + serviceMap.nextEndPoint
+          // );
+          failCount++;
+        } else {
+          // Found good healthy end point
+          //         console.log("Found good health end point " + serviceMap.nextEndPoint);
+          break;
+        }
+      }
+
+      if (failCount == maxFails) {
+        console.log("No Services Service not available ");
         res.status(500);
         res.send("Service not available");
         return;
       }
     }
 
+    // Increment end point if more then 1
+    if (serviceMap.endPoints.length > 1) {
+      if (serviceMap.nextEndPoint + 1 < serviceMap.endPoints.length) {
+        serviceMap.nextEndPoint = serviceMap.nextEndPoint + 1;
+      } else {
+        serviceMap.nextEndPoint = 0;
+      }
+    }
+
     if (req.method === "GET") {
-      console.log("Process GET");
+      // console.log("Process GET");
       // Pass all headers from caller to the new end point
       axios
         .get(endPointURL + remainingURL, { headers: req.headers })
@@ -278,9 +343,102 @@ const processHTTPRequest = async function (req, res, next) {
     if (req.method === "POST") {
       // Pass all headers from caller to the new end point
       const bodyData = req.body;
-      console.log("Process POST : " + bodyData);
+      //  console.log("Process POST : " + bodyData);
       axios
         .post(endPointURL + remainingURL, bodyData, { headers: req.headers })
+        .then(function (response) {
+          res.status(response.status);
+          //console.log(response.headers);
+          // Pass response headers to caller
+          res.headers = response.headers;
+          res.send(response.data);
+
+          //add data to Redis
+          //         redis_client.setex(id, 3600, JSON.stringify(starShipInfoData));
+        })
+        .catch(function (error) {
+          if (error.response && error.response.status) {
+            // handle error
+            res.status(error.response.status);
+            res.send(error.response.data);
+          } else {
+            console.log("Service not available 2");
+            res.status(500);
+            res.send("Service Unavailable");
+          }
+        });
+    }
+
+    if (req.method === "PUT") {
+      // Pass all headers from caller to the new end point
+      const bodyData = req.body;
+      //  console.log("Process POST : " + bodyData);
+      axios
+        .put(endPointURL + remainingURL, bodyData, {
+          headers: req.headers,
+        })
+        .then(function (response) {
+          res.status(response.status);
+          //console.log(response.headers);
+          // Pass response headers to caller
+          res.headers = response.headers;
+          res.send(response.data);
+
+          //add data to Redis
+          //         redis_client.setex(id, 3600, JSON.stringify(starShipInfoData));
+        })
+        .catch(function (error) {
+          if (error.response && error.response.status) {
+            // handle error
+            res.status(error.response.status);
+            res.send(error.response.data);
+          } else {
+            console.log("Service not available 2");
+            res.status(500);
+            res.send("Service Unavailable");
+          }
+        });
+    }
+
+    if (req.method === "PATCH") {
+      // Pass all headers from caller to the new end point
+      const bodyData = req.body;
+      //  console.log("Process POST : " + bodyData);
+      axios
+        .patch(endPointURL + remainingURL, bodyData, {
+          headers: req.headers,
+        })
+        .then(function (response) {
+          res.status(response.status);
+          //console.log(response.headers);
+          // Pass response headers to caller
+          res.headers = response.headers;
+          res.send(response.data);
+
+          //add data to Redis
+          //         redis_client.setex(id, 3600, JSON.stringify(starShipInfoData));
+        })
+        .catch(function (error) {
+          if (error.response && error.response.status) {
+            // handle error
+            res.status(error.response.status);
+            res.send(error.response.data);
+          } else {
+            console.log("Service not available 2");
+            res.status(500);
+            res.send("Service Unavailable");
+          }
+        });
+    }
+
+    if (req.method === "DELETE") {
+      // Pass all headers from caller to the new end point
+      const bodyData = req.body;
+      //  console.log("Process POST : " + bodyData);
+      axios
+        .delete(endPointURL + remainingURL, bodyData, {
+          headers: req.headers,
+        })
         .then(function (response) {
           res.status(response.status);
           //console.log(response.headers);
@@ -311,12 +469,12 @@ const processHTTPRequest = async function (req, res, next) {
 
 // Health Check processing
 const processHealthCheck = async function () {
-  console.log(
-    "Health Check Processing every " + HEALTH_CHECK_INTERVAL + " seconds"
-  );
+  // console.log(
+  //   "Health Check Processing every " + HEALTH_CHECK_INTERVAL + " seconds"
+  // );
 
   for (const serviceMappingKey in serviceMappings) {
-    console.log(" Key: " + serviceMappingKey);
+    //  console.log(" Key: " + serviceMappingKey);
     //   console.log(`${serviceMappingKey}: ${object[property]}`);
 
     const serviceMapping = serviceMappings[serviceMappingKey];
@@ -327,19 +485,21 @@ const processHealthCheck = async function () {
       try {
         const healthResponse = await axios.get(endPoint.healthURL);
 
-        console.log("Health status=" + healthResponse.status);
+        //    console.log("Health status=" + healthResponse.status);
         // Check for healthy status
         if (healthResponse.status === 200) {
-          console.log("Health true");
+          //      console.log("Health true");
           endPoint.lastHealthStatus = true;
         } else {
           endPoint.lastHealthStatus = false;
-          console.log("Health false");
+          //   console.log("Health false");
+          console.log("Failed healthURL: " + endPoint.healthURL);
         }
       } catch (error) {
-        console.log("Health Failure: " + endPoint.healthURL);
+        console.log("Failed healthURL: " + endPoint.healthURL);
+        //    console.log("Health Failure: " + endPoint.healthURL);
         endPoint.lastHealthStatus = false;
-        console.log("Health false");
+        //   console.log("Health false");
       }
     }
   }
